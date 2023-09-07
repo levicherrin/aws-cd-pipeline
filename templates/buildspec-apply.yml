@@ -1,0 +1,45 @@
+version: 0.2
+  
+env:
+  variables:
+    CODE_SRC_DIR: "infrastructure/terraform/web-host/envs"
+    TF_VERSION: "1.4.6"
+  exported-variables:
+    - WEBSITE_BUCKET
+
+phases:
+  install:
+    runtime-versions:
+      python: 3.x
+    commands:
+      - "curl -s -qL -o terraform.zip https://releases.hashicorp.com/terraform/${TF_VERSION}/terraform_${TF_VERSION}_linux_amd64.zip"
+      - "unzip -o terraform.zip"
+      - "mv terraform /bin"
+      - "rm terraform.zip"
+  pre_build:
+    commands:
+      - "echo ## setting code src value by env"
+      - "CODE_SRC_DIR=$CODE_SRC_DIR/$TF_VAR_env"
+      - "export TF_VAR_env"
+      - "cp -a ${CODEBUILD_SRC_DIR_plan_output}/. ${CODEBUILD_SRC_DIR}/${CODE_SRC_DIR}"
+  build:
+    commands:
+      - "cd ${CODEBUILD_SRC_DIR}/${CODE_SRC_DIR}"
+      - "echo ## TERRAFORM INIT : Initialize the Terraform Workspace"
+      - "terraform init -input=false"
+      - "echo ## TERRAFORM APPLY : Starting with the Terraform Apply"
+      - "terraform apply -input=false tfplan"
+  post_build:
+    commands:
+      - 'WEBSITE_BUCKET="$(terraform output -raw website_bucket)"'
+      - "echo checking for bucket variable..."
+      - "printenv | grep WEBSITE_BUCKET"
+      - 'export API_URL="$(terraform output -raw api_invoke_url)"'
+      - "cd ${CODEBUILD_SRC_DIR}/website"
+      - "python3 ../lambda/update.py"
+      - "ls -l"
+artifacts:
+  name: "website"
+  files:
+    - '**/*'
+  base-directory: ${CODEBUILD_SRC_DIR}/website

@@ -1,0 +1,61 @@
+version: 0.2
+  
+env:
+  variables:
+    CODE_SRC_DIR: "infrastructure/terraform/web-host/envs"
+    TF_VERSION: "1.4.6"
+    ENVIRONMENT: "dev"
+    TFSEC_VERSION: "v1.28.1"
+
+phases:
+  install:
+    runtime-versions:
+      python: 3.x
+    commands:
+      - "curl -s -qL -o terraform.zip https://releases.hashicorp.com/terraform/${TF_VERSION}/terraform_${TF_VERSION}_linux_amd64.zip"
+      - "unzip -o terraform.zip"
+      - "mv terraform /bin"
+      - "rm terraform.zip"
+      - "yum update -y"
+      - "yum install -y curl jq awscli"
+      - "pip3 install checkov"
+      - "wget -q -O tfsec https://github.com/aquasecurity/tfsec/releases/download/${TFSEC_VERSION}/tfsec-linux-amd64"
+      - "chmod +x ./tfsec"
+      - "mv ./tfsec /usr/local/bin/tfsec"
+  pre_build:
+    commands:
+      - "echo ## setting code src value by env"
+      - "CODE_SRC_DIR=$CODE_SRC_DIR/$TF_VAR_env"
+      - "export TF_VAR_env"
+  build:
+    commands:
+      - "cd ${CODEBUILD_SRC_DIR}/${CODE_SRC_DIR}"
+      - "echo ## TERRAFORM INIT : Initialize the Terraform Workspace"
+      - "terraform init -input=false"
+      - "echo ## VALIDATION : Starting ..."
+      - "mkdir -p ${CODEBUILD_SRC_DIR}/reports"
+      - "terraform validate"
+      - "terraform fmt -recursive"
+      - "ls -al -R"
+      - "echo ## VALIDATION : Running tfsec ..."
+      - "tfsec . --format junit --out tfsec-junit.xml || true"
+      - "ls . -al"
+      - "echo ## VALIDATION : Running checkov ..."
+      - "checkov -o junitxml --framework terraform -d . >checkov.xml || true"
+      - "ls . -al"
+artifacts:
+  name: "validate_output"
+  files:
+    - '.terraform/**/*'
+    - '.terraform.lock.hcl'
+  base-directory: $CODE_SRC_DIR
+  exclude-paths: "**/providers/**/*"
+reports:
+  checkov-reports:
+    files:
+      - "**/checkov.xml"
+    file-format: "JUNITXML"
+  tfsec-reports:
+    files:
+      - "**/tfsec-junit.xml"
+    file-format: "JUNITXML"
